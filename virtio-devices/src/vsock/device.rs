@@ -8,6 +8,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::collections::HashMap;
+use std::num::Wrapping;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -540,6 +542,15 @@ where
     fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
         self.common.access_platform()
     }
+
+    fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
+        // Live host<->guest connections, including ones closed on the host
+        // that are still finishing their shutdown handshake with the guest.
+        // A snapshot can poll this to pause only once the guest has seen
+        // every close.
+        let connections = self.backend.read().ok()?.connections().len() as u64;
+        Some(HashMap::from([("vsock_connections", Wrapping(connections))]))
+    }
 }
 
 impl<B> Pausable for Vsock<B>
@@ -578,6 +589,13 @@ mod unit_tests {
     use super::super::*;
     use super::*;
     use crate::ActivateError;
+
+    #[test]
+    fn test_counters_report_vsock_connections() {
+        let ctx = TestContext::new();
+        let counters = ctx.device.counters().unwrap();
+        assert_eq!(counters["vsock_connections"], Wrapping(0));
+    }
 
     #[test]
     fn test_virtio_device() {
